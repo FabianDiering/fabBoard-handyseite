@@ -49,7 +49,10 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const ortszeit = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16).replace('T', ' '); };
 const nid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-const TYPEN = { 'frage': 'Frage', 'frage-an-claude': 'Frage an Claude', 'anweisung': 'Anweisung', 'idee': 'Idee', 'aufgabe': 'Aufgabe', 'info': 'Info' };
+// Name der am PC gewählten KI (daten/einstellungen.json, Feld anbieter; siehe anbieter.js); unbekannt = „KI“
+const KI_KURZ = { 'claude': 'Claude', 'anthropic-key': 'Claude', 'codex': 'Codex', 'openai-key': 'Codex', 'gemini': 'Gemini', 'google-key': 'Gemini', 'mistral-key': 'Mistral', 'ollama': 'Ollama', 'lmstudio': 'LM Studio' };
+let KI = 'KI';
+const TYPEN = () => ({ 'frage': 'Frage', 'frage-an-claude': 'Frage an ' + KI, 'anweisung': 'Anweisung', 'idee': 'Idee', 'aufgabe': 'Aufgabe', 'info': 'Info' });
 // Zugang (Repo + Schlüssel) bleibt nur auf diesem Handy gespeichert
 let Z = {}; try { Z = JSON.parse(localStorage.getItem('fabboard-handy') || '{}'); } catch (e) {}
 const merken = () => { try { localStorage.setItem('fabboard-handy', JSON.stringify(Z)); } catch (e) {} };
@@ -79,6 +82,7 @@ async function start() {
     const liste = await gh('projekte');
     S.dateien = liste.filter((f) => f.name.endsWith('.json') && !f.name.endsWith('.archiv.json')).map((f) => f.name.slice(0, -5));
     if (!S.dateien.includes(S.aktiv)) S.aktiv = S.dateien[0] || '';
+    try { KI = KI_KURZ[JSON.parse(b64aus((await gh('einstellungen.json')).content)).anbieter] || 'KI'; } catch (e) {}
     // Name und Zahl offener Punkte aller Projekte für das Aufklapp-Menü
     await Promise.all(S.dateien.filter((id) => id !== S.aktiv).map(async (id) => { try { merkeInfo(id, JSON.parse(b64aus((await gh(`projekte/${id}.json`)).content))); } catch (e) {} }));
     await laden();
@@ -99,7 +103,7 @@ async function speichern() {
   try {
     const d = await gh(`projekte/${S.aktiv}.json`, { method: 'PUT', body: JSON.stringify({ message: 'Handy ' + ortszeit(), content: b64ein(JSON.stringify(p, null, 1)), sha: S.sha }) });
     S.sha = d.content.sha; S.dirty = false; render();
-    status('Gespeichert. Der PC holt es vor dem nächsten Claude-Lauf.');
+    status('Gespeichert. Der PC holt es vor dem nächsten Lauf.');
   } catch (e) {
     if (neu) p.nachrichten.shift();
     $('#speichern').disabled = false;
@@ -114,14 +118,14 @@ function render() {
   const offen = (p.nachrichten || []).filter((n) => n.status !== 'erledigt');
   $('#inhalt').innerHTML = themen.map((t) => `<h2>${esc(t.titel)}</h2>` + t.items.map((it) => `
     <div class="it" data-it="${esc(it.id)}">
-      <div class="typ">${esc(TYPEN[it.typ] || it.typ)}${it.wer === 'claude' ? ' · für Claude' : ''}</div>
+      <div class="typ">${esc(TYPEN()[it.typ] || it.typ)}${it.wer === 'claude' ? ' · für ' + esc(KI) : ''}</div>
       <h3>${esc(it.titel)}</h3>${it.text ? `<p>${esc(it.text)}</p>` : ''}
       ${(it.optionen || []).map((o, i) => `<button class="opt${it.mehrfach ? ' multi' : ''}${o.gewaehlt ? ' an' : ''}" data-opt="${i}"><i></i><span>${esc(o.t)}${o.empf ? '<em>Empfehlung</em>' : ''}</span></button>`).join('')}
       <textarea data-kom placeholder="Kommentar">${esc(it.kommentar)}</textarea>
     </div>`).join('')).join('') +
-    `<h2>An Claude</h2>${offen.map((n) => `<div class="it"><p>${esc(n.text)}</p><div class="typ">offen · ${esc(n.erstellt)}</div></div>`).join('')}
-    <textarea id="msg" placeholder="Neue Nachricht an Claude"></textarea>
-    <p class="hinweis">„Claude starten“ geht nur am PC. Entschiedene Fragen setzt Claude beim nächsten Lauf um.</p>
+    `<h2>An ${esc(KI)}</h2>${offen.map((n) => `<div class="it"><p>${esc(n.text)}</p><div class="typ">offen · ${esc(n.erstellt)}</div></div>`).join('')}
+    <textarea id="msg" placeholder="Neue Nachricht an ${esc(KI)}"></textarea>
+    <p class="hinweis">„${esc(KI)} starten“ geht nur am PC. Entschiedene Fragen setzt ${esc(KI)} beim nächsten Lauf um.</p>
     <p class="hinweis"><a href="#" id="abmelden">Zugang ändern</a></p>`;
   $('#speichern').disabled = !S.dirty;
 }
