@@ -40,10 +40,11 @@ label{display:block;margin:14px 0 4px;font-size:13px;color:var(--muted)}
 </head>
 <body>
 <div class="wrap">
-  <header class="kopf"><span class="marke">fabBoard<i>.</i></span><select id="projekt" aria-label="Projekt"></select></header>
+  <header class="kopf"><span class="marke">fabBoard<i>.</i></span><select id="projekt"></select></header>
   <main id="inhalt"></main>
 </div>
-<div class="leiste" id="leiste" hidden><span id="status"></span><button class="btn leer" id="neu">Neu laden</button><button class="btn" id="speichern" disabled>Speichern</button></div>
+<div class="leiste" id="leiste" hidden><span id="status"></span><button class="btn leer" id="neu"></button><button class="btn" id="speichern" disabled></button></div>
+<script src="texte.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -51,8 +52,11 @@ const ortszeit = () => { const d = new Date(); return new Date(d.getTime() - d.g
 const nid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 // Name der am PC gewählten KI (daten/einstellungen.json, Feld anbieter; siehe anbieter.js); unbekannt = „KI“
 const KI_KURZ = { 'claude': 'Claude', 'anthropic-key': 'Claude', 'codex': 'Codex', 'openai-key': 'Codex', 'gemini': 'Gemini', 'google-key': 'Gemini', 'mistral-key': 'Mistral', 'ollama': 'Ollama', 'lmstudio': 'LM Studio' };
-let KI = 'KI';
-const TYPEN = () => ({ 'frage': 'Frage', 'frage-an-claude': 'Frage an ' + KI, 'anweisung': 'Anweisung', 'idee': 'Idee', 'aufgabe': 'Aufgabe', 'info': 'Info' });
+let KI = T('ki');
+// Feste Texte (Leiste, Projekt-Auswahl) in der gewählten Sprache
+const statisch = () => { document.documentElement.lang = sprache(); $('#projekt').setAttribute('aria-label', T('hProjekt')); $('#neu').textContent = T('hNeuLaden'); $('#speichern').textContent = T('speichern'); };
+statisch();
+const TYPEN = () => ({ 'frage': T('typFrage'), 'frage-an-claude': T('typFrageAn', { ki: KI }), 'anweisung': T('typAnweisung'), 'idee': T('typIdee'), 'aufgabe': T('typAufgabe'), 'info': T('typInfo') });
 // Zugang (Repo + Schlüssel) bleibt nur auf diesem Handy gespeichert
 let Z = {}; try { Z = JSON.parse(localStorage.getItem('fabboard-handy') || '{}'); } catch (e) {}
 const merken = () => { try { localStorage.setItem('fabboard-handy', JSON.stringify(Z)); } catch (e) {} };
@@ -66,10 +70,10 @@ const b64aus = (b) => new TextDecoder().decode(Uint8Array.from(atob(b.replace(/\
 const b64ein = (s) => { const u = new TextEncoder().encode(s); let t = ''; for (let i = 0; i < u.length; i += 8192) t += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(t); };
 async function gh(pfad, opt = {}) {
   const r = await fetch(`https://api.github.com/repos/${Z.repo}/contents/${pfad}`, { cache: 'no-store', ...opt, headers: { Authorization: 'Bearer ' + Z.token, Accept: 'application/vnd.github+json', ...(opt.headers || {}) } });
-  if (r.status === 401) throw new Error('Schlüssel ungültig oder abgelaufen.');
-  if (r.status === 404) throw new Error('Repo oder Datei nicht gefunden (Name und Schlüssel-Rechte prüfen).');
+  if (r.status === 401) throw new Error(T('hSchluesselUngueltig'));
+  if (r.status === 404) throw new Error(T('hNichtGefunden'));
   if (r.status === 409 || r.status === 422) throw new Error('KONFLIKT');
-  if (!r.ok) throw new Error('GitHub antwortet mit Fehler ' + r.status + '.');
+  if (!r.ok) throw new Error(T('hGithubFehler', { code: r.status }));
   return r.json();
 }
 const status = (t, fehler) => { $('#status').textContent = t; $('#status').className = fehler ? 'fehler' : ''; };
@@ -77,12 +81,13 @@ const status = (t, fehler) => { $('#status').textContent = t; $('#status').class
 // ---------- Laden / Speichern
 async function start() {
   if (!Z.repo || !Z.token) return zugang();
-  $('#leiste').hidden = false; status('Lädt …');
+  $('#leiste').hidden = false; status(T('hLaedt'));
   try {
     const liste = await gh('projekte');
     S.dateien = liste.filter((f) => f.name.endsWith('.json') && !f.name.endsWith('.archiv.json')).map((f) => f.name.slice(0, -5));
     if (!S.dateien.includes(S.aktiv)) S.aktiv = S.dateien[0] || '';
-    try { KI = KI_KURZ[JSON.parse(b64aus((await gh('einstellungen.json')).content)).anbieter] || 'KI'; } catch (e) {}
+    // KI-Name und Sprache wie am PC (einstellungen.json); ohne Sprache-Einstellung gilt die Sprache des Handys
+    try { const e = JSON.parse(b64aus((await gh('einstellungen.json')).content)); setzeSprache(e.sprache || ''); statisch(); KI = KI_KURZ[e.anbieter] || T('ki'); } catch (e) {}
     // Name und Zahl offener Punkte aller Projekte für das Aufklapp-Menü
     await Promise.all(S.dateien.filter((id) => id !== S.aktiv).map(async (id) => { try { merkeInfo(id, JSON.parse(b64aus((await gh(`projekte/${id}.json`)).content))); } catch (e) {} }));
     await laden();
@@ -92,22 +97,22 @@ async function laden() {
   if (!S.aktiv) return;
   const d = await gh(`projekte/${S.aktiv}.json`);
   S.p = JSON.parse(b64aus(d.content)); S.sha = d.sha; S.dirty = false; merkeInfo(S.aktiv, S.p);
-  $('#projekt').innerHTML = S.dateien.map((id) => { const x = S.info[id]; return `<option value="${esc(id)}"${id === S.aktiv ? ' selected' : ''}>${esc(x ? `${x.name} · ${x.offen} offen` : id)}</option>`; }).join('');
-  render(); status('Stand ' + ortszeit().slice(11));
+  $('#projekt').innerHTML = S.dateien.map((id) => { const x = S.info[id]; return `<option value="${esc(id)}"${id === S.aktiv ? ' selected' : ''}>${esc(x ? `${x.name} · ${T('offenN', { n: x.offen })}` : id)}</option>`; }).join('');
+  render(); status(T('hStand', { zeit: ortszeit().slice(11) }));
 }
 async function speichern() {
   const p = S.p; p.geaendert = ortszeit();
   const neu = $('#msg')?.value.trim();
   if (neu) { p.nachrichten ||= []; p.nachrichten.unshift({ id: nid('m'), text: neu, erstellt: ortszeit(), von: 'fabian', status: 'offen', antwort: '' }); }
-  $('#speichern').disabled = true; status('Speichert …');
+  $('#speichern').disabled = true; status(T('speichert'));
   try {
     const d = await gh(`projekte/${S.aktiv}.json`, { method: 'PUT', body: JSON.stringify({ message: 'Handy ' + ortszeit(), content: b64ein(JSON.stringify(p, null, 1)), sha: S.sha }) });
     S.sha = d.content.sha; S.dirty = false; render();
-    status('Gespeichert. Der PC holt es vor dem nächsten Lauf.');
+    status(T('hGespeichert'));
   } catch (e) {
     if (neu) p.nachrichten.shift();
     $('#speichern').disabled = false;
-    status(e.message === 'KONFLIKT' ? 'Datei wurde inzwischen geändert. Bitte „Neu laden“ und nochmal eintragen.' : e.message, true);
+    status(e.message === 'KONFLIKT' ? T('hKonflikt') : e.message, true);
   }
 }
 
@@ -118,19 +123,19 @@ function render() {
   const offen = (p.nachrichten || []).filter((n) => n.status !== 'erledigt');
   $('#inhalt').innerHTML = themen.map((t) => `<h2>${esc(t.titel)}</h2>` + t.items.map((it) => `
     <div class="it" data-it="${esc(it.id)}">
-      <div class="typ">${esc(TYPEN()[it.typ] || it.typ)}${it.wer === 'claude' ? ' · für ' + esc(KI) : ''}</div>
+      <div class="typ">${esc(TYPEN()[it.typ] || it.typ)}${it.wer === 'claude' ? esc(T('hFuer', { ki: KI })) : ''}</div>
       <h3>${esc(it.titel)}</h3>${it.text ? `<p>${esc(it.text)}</p>` : ''}
-      ${(it.optionen || []).map((o, i) => `<button class="opt${it.mehrfach ? ' multi' : ''}${o.gewaehlt ? ' an' : ''}" data-opt="${i}"><i></i><span>${esc(o.t)}${o.empf ? '<em>Empfehlung</em>' : ''}</span></button>`).join('')}
-      <textarea data-kom placeholder="Kommentar">${esc(it.kommentar)}</textarea>
+      ${(it.optionen || []).map((o, i) => `<button class="opt${it.mehrfach ? ' multi' : ''}${o.gewaehlt ? ' an' : ''}" data-opt="${i}"><i></i><span>${esc(o.t)}${o.empf ? `<em>${T('empfehlung')}</em>` : ''}</span></button>`).join('')}
+      <textarea data-kom placeholder="${T('kommentar')}">${esc(it.kommentar)}</textarea>
     </div>`).join('')).join('') +
-    `<h2>An ${esc(KI)}</h2>${offen.map((n) => `<div class="it"><p>${esc(n.text)}</p><div class="typ">offen · ${esc(n.erstellt)}</div></div>`).join('')}
-    <textarea id="msg" placeholder="Neue Nachricht an ${esc(KI)}"></textarea>
-    <p class="hinweis">„${esc(KI)} starten“ geht nur am PC. Entschiedene Fragen setzt ${esc(KI)} beim nächsten Lauf um.</p>
-    <p class="hinweis"><a href="#" id="abmelden">Zugang ändern</a></p>`;
+    `<h2>${esc(T('an', { wer: KI }))}</h2>${offen.map((n) => `<div class="it"><p>${esc(n.text)}</p><div class="typ">${T('hOffen')} · ${esc(n.erstellt)}</div></div>`).join('')}
+    <textarea id="msg" placeholder="${esc(T('hNeueNachricht', { ki: KI }))}"></textarea>
+    <p class="hinweis">${esc(T('hNurPc', { ki: KI }))}</p>
+    <p class="hinweis"><a href="#" id="abmelden">${T('hZugangAendern')}</a></p>`;
   $('#speichern').disabled = !S.dirty;
 }
 const finde = (el) => { const id = el.closest('[data-it]').dataset.it; for (const t of S.p.themen) { const it = t.items.find((x) => x.id === id); if (it) return it; } };
-const markieren = () => { S.dirty = true; $('#speichern').disabled = false; status('Nicht gespeichert'); };
+const markieren = () => { S.dirty = true; $('#speichern').disabled = false; status(T('hNichtGespeichert')); };
 $('#inhalt').addEventListener('click', (ev) => {
   const o = ev.target.closest('.opt');
   if (o) { const it = finde(o); const i = +o.dataset.opt; if (it.mehrfach) it.optionen[i].gewaehlt = !it.optionen[i].gewaehlt; else it.optionen.forEach((x, j) => { x.gewaehlt = j === i ? !x.gewaehlt : false; }); const m = $('#msg').value; render(); $('#msg').value = m; markieren(); }
@@ -141,22 +146,22 @@ $('#inhalt').addEventListener('input', (ev) => {
   if (ev.target.id === 'msg') markieren();
 });
 $('#projekt').addEventListener('change', async (ev) => {
-  if (S.dirty && !confirm('Ungespeicherte Änderungen verwerfen?')) { ev.target.value = S.aktiv; return; }
+  if (S.dirty && !confirm(T('hVerwerfen'))) { ev.target.value = S.aktiv; return; }
   S.aktiv = ev.target.value; Z.aktiv = S.aktiv; merken();
-  try { status('Lädt …'); await laden(); } catch (e) { status(e.message, true); }
+  try { status(T('hLaedt')); await laden(); } catch (e) { status(e.message, true); }
 });
 $('#speichern').addEventListener('click', speichern);
-$('#neu').addEventListener('click', async () => { if (S.dirty && !confirm('Ungespeicherte Änderungen verwerfen?')) return; try { status('Lädt …'); await laden(); } catch (e) { status(e.message, true); } });
+$('#neu').addEventListener('click', async () => { if (S.dirty && !confirm(T('hVerwerfen'))) return; try { status(T('hLaedt')); await laden(); } catch (e) { status(e.message, true); } });
 
 // ---------- Zugang einrichten
 function zugang(fehler) {
   $('#leiste').hidden = true;
-  $('#inhalt').innerHTML = `<h2>Zugang</h2>
+  $('#inhalt').innerHTML = `<h2>${T('hZugang')}</h2>
     ${fehler ? `<p class="fehler">${esc(fehler)}</p>` : ''}
-    <form id="zf"><label>GitHub-Repo (benutzer/repo)</label><input name="repo" value="${esc(Z.repo)}" placeholder="deinname/fabboard-daten" autocapitalize="off" autocomplete="off" required>
-    <label>Zugangsschlüssel (Fine-grained Token, nur dieses Repo, „Contents: Read and write“)</label><input name="token" type="password" value="${esc(Z.token)}" autocomplete="off" required>
-    <p><button class="btn">Verbinden</button></p></form>
-    <p class="hinweis">Der Schlüssel bleibt nur in diesem Browser auf diesem Handy gespeichert.</p>`;
+    <form id="zf"><label>${T('hRepo')}</label><input name="repo" value="${esc(Z.repo)}" placeholder="${T('hRepoBeispiel')}" autocapitalize="off" autocomplete="off" required>
+    <label>${T('hToken')}</label><input name="token" type="password" value="${esc(Z.token)}" autocomplete="off" required>
+    <p><button class="btn">${T('hVerbinden')}</button></p></form>
+    <p class="hinweis">${T('hTokenHinweis')}</p>`;
   $('#zf').addEventListener('submit', (ev) => {
     ev.preventDefault(); const fd = new FormData(ev.target);
     Z.repo = fd.get('repo').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''); Z.token = fd.get('token').trim();
